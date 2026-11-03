@@ -1,0 +1,74 @@
+# 로컬 실행·통합 시험용. 계정 demo/demo 는 개발용 더미 값이며 실제 비밀값이 아니다.
+#   ECHO_ENVIRONMENT=aws-tokyo docker compose up -d --wait   →  http://localhost:8080
+#   docker compose down -v                                    (장부까지 지운다)
+# 앱은 PgBouncer(transaction 모드)로만 DB 에 붙는다. 시연 인프라(echo-infra)와 같은 구성이다.
+name: echo-demo-app
+
+services:
+  db:
+    image: postgres:17
+    # 이전 시연의 논리 복제 출발점이 될 수 있게 wal_level=logical 로 띄운다.
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+    ports:
+      # 기본 포트(5432)·echo-was(55432)와 겹치지 않게 한다.
+      - "55433:5432"
+    volumes:
+      - demo-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.1-p0
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: demo
+      DB_PASSWORD: demo
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      LISTEN_PORT: "6432"
+      # 프로토콜 수준 prepared statement 지원을 꺼, 앱이 prepare 없이 도는지 엄격하게 확인한다.
+      MAX_PREPARED_STATEMENTS: "0"
+    ports:
+      # 통합 시험(TEST_DATABASE_URL)이 이 포트로 붙는다.
+      - "56432:6432"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U demo -d demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://demo:demo@pgbouncer:6432/demo
+      ECHO_ENVIRONMENT: ${ECHO_ENVIRONMENT:-local}
+      APP_VERSION: ${APP_VERSION:-dev}
+    ports:
+      - "8080:8080"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_signal: SIGTERM
+
+volumes:
+  demo-db-data:

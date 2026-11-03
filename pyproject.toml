@@ -1,0 +1,43 @@
+[project]
+name = "echo-demo-app"
+version = "0.1.0"
+description = "Team Echo 이전 시연용 관리 대상 앱 (웹앱 + PostgreSQL 순번 쓰기)"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.0",
+    "psycopg[binary,pool]>=3.3.6",
+    "pydantic-settings>=2.16.2",
+    "uvicorn>=0.54.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# 규칙 문서의 예시 코드는 포맷 대상이 아니다.
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# 건너뛴 테스트의 이유(DB 미연결 등)를 결과 요약에 항상 보여 준다.
+addopts = "-rs"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["integration: PgBouncer 를 거친 실제 PostgreSQL 이 필요한 테스트 (TEST_DATABASE_URL)"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1",
+    "ruff>=0.17.3",
+]
