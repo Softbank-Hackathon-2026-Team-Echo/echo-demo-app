@@ -138,7 +138,13 @@ SELECT written_env, count(*), min(n), max(n) FROM demo.seq_write GROUP BY writte
 
 ## 배포
 
-이 저장소는 이미지를 게시하지 않는다. Echo 플랫폼이 저장소 주소 + 커밋으로 `Dockerfile` 을 빌드해 배포한다(공개 저장소라 토큰 불필요).
+Echo 플랫폼은 저장소 주소 + 커밋으로 `Dockerfile` 을 빌드해 배포한다(공개 저장소라 토큰 불필요).
+
+따로, main 이 바뀔 때마다 `image` 워크플로가 **공개 이미지(amd64 + arm64)** 를 GHCR 에 게시한다. 클라우드 자격 증명 없이 어느 기기에서든 같은 digest 를 받기 위한 것이다(echo-infra `onprem/` 의 k3s 설치가 쓴다).
+
+```text
+ghcr.io/softbank-hackathon-2026-team-echo/echo-demo-app:sha-<커밋 전체>   # 배포에는 @sha256:<digest> 를 쓴다(실행 요약에 표시)
+```
 
 - echo-was 서비스 등록 값: `containerPort` **8080**, `healthCheckPath` **`/healthz`** (기본값과 같다). 준비 확인이 필요하면 `/readyz`.
 - 배포 실행기가 넣어야 할 환경 변수: `DATABASE_URL`(그 환경의 PgBouncer), `ECHO_ENVIRONMENT`(`aws-tokyo`·`gcp-seoul`·`onprem…`), 선택 `APP_VERSION`(커밋).
