@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+.deep-interview
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.env
+.env.*
+tests
+docs
+specs
+*.md
+.DS_Store
