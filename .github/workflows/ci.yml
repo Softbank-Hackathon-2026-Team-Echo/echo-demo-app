@@ -1,0 +1,74 @@
+# PR·main 검사. 이미지 게시·배포는 하지 않는다(빌드·배포는 Echo 플랫폼이 한다).
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # 통합 시험은 PgBouncer(transaction 모드)를 거쳐 실제 PostgreSQL 에 붙는다.
+    # 계정 demo/demo 는 CI 안에서만 쓰는 더미 값이다.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: demo
+          POSTGRES_DB: demo
+        options: >-
+          --health-cmd "pg_isready -U demo -d demo"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+      pgbouncer:
+        image: edoburu/pgbouncer:v1.26.1-p0
+        env:
+          DB_HOST: postgres
+          DB_PORT: "5432"
+          DB_USER: demo
+          DB_PASSWORD: demo
+          AUTH_TYPE: scram-sha-256
+          POOL_MODE: transaction
+          LISTEN_PORT: "6432"
+          MAX_PREPARED_STATEMENTS: "0"
+        ports:
+          - 6432:6432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 6432 -U demo -d demo"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgresql://demo:demo@127.0.0.1:6432/demo
+      # DB 가 없으면 통합 시험을 건너뛰지 않고 실패시킨다. 건너뛴 시험이 하나라도 있어도 실패다.
+      REQUIRE_DB_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.17"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app
+      - run: uv run pytest
+      - run: docker build -t echo-demo-app:ci .
+      - name: Container /healthz without DB
+        run: |
+          docker run -d --name demo-app -p 18080:8080 \
+            -e DATABASE_URL=postgresql://none:none@127.0.0.1:1/none \
+            -e ECHO_ENVIRONMENT=ci echo-demo-app:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs demo-app
+          exit 1
