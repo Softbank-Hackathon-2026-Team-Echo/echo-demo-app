@@ -1,5 +1,6 @@
 """DB 가 없을 때도 프로세스가 뜨고, 생존 확인만 성공하는지 본다."""
 
+import re
 from collections.abc import AsyncIterator
 
 import httpx
@@ -63,6 +64,25 @@ async def test_info_blank_environment_returns_unknown() -> None:
         body = (await client.get("/api/info")).json()
     assert body["environment"] == "unknown"
     assert body["version"] == "dev"
+
+
+async def test_index_serves_page_without_external_resources(client: httpx.AsyncClient) -> None:
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    html = response.text
+    for text in (
+        "지금 순번",
+        "응답 환경",
+        "쓰기 시작",
+        "멈춤",
+        "/api/writes",
+        "/api/writes/summary",
+    ):
+        assert text in html
+    # 외부 CDN·폰트·스크립트를 쓰지 않는다(차단 환경에서도 뜨게).
+    assert not re.search(r"""(src|href)\s*=\s*["']?(https?:)?//""", html)
+    assert not re.search(r"""@import|url\(\s*["']?(https?:)?//""", html)
 
 
 def test_ledger_summary_missing_counts_gaps_like_verify_sh() -> None:

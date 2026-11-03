@@ -3,10 +3,11 @@ import socket
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from psycopg_pool import AsyncConnectionPool
 
 from app import ledger
@@ -24,6 +25,7 @@ from app.schemas import (
 
 logger = logging.getLogger(__name__)
 
+INDEX_HTML = Path(__file__).resolve().parent / "static" / "index.html"
 DB_UNAVAILABLE = "DB_UNAVAILABLE"
 
 
@@ -154,5 +156,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except psycopg.Error as exc:
             return _db_unavailable("seq_summary", exc)
         return SummaryResponse.from_summary(summary, ctx.settings.environment)
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        return FileResponse(INDEX_HTML, media_type="text/html; charset=utf-8")
 
     return app
