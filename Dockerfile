@@ -23,7 +23,11 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PORT=8080
 WORKDIR /app
 
-RUN groupadd --system --gid 1001 app && \
+# 베이스 이미지의 pip 를 지운다. 앱은 /opt/venv 만 쓰고 실행 중 pip 를 부르지 않는다.
+# pip 안에 함께 든 msgpack·setuptools·urllib3 가 수정 버전이 있는 HIGH 취약점으로 잡혀
+# 이미지 보안 검사(Trivy, echo-was C-IMG-1)가 FAIL 이 되기 때문이다.
+RUN python -m pip uninstall --yes --no-cache-dir pip && \
+    groupadd --system --gid 1001 app && \
     useradd --system --uid 1001 --gid app --no-create-home app
 
 COPY --from=builder /opt/venv /opt/venv
