@@ -4,6 +4,7 @@
 - GitHub 이슈: https://github.com/Softbank-Hackathon-2026-Team-Echo/echo-infra/issues/4 (범위 확정 댓글: issuecomment-6593833866)
 - 저장소: https://github.com/Softbank-Hackathon-2026-Team-Echo/echo-demo-app (공개, main 단일 + 기능 브랜치, PR 필수)
 - 담당: 김지민
+- 변경분 SPEC: [infra-9-metrics.md](infra-9-metrics.md) — `GET /metrics` 추가(인프라 9)
 
 ## 1. 목적
 

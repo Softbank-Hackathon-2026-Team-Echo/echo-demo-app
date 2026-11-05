@@ -23,7 +23,7 @@ Team Echo 이전 시연용 **관리 대상 앱**(웹앱 + PostgreSQL 순번 쓰�
 
 | 구성 요소 | 하는 일 |
 |---|---|
-| 웹 서버(FastAPI) | `/healthz`·`/readyz`·`/api/info`·`/api/writes`·`/api/writes/summary`·화면(`/`) |
+| 웹 서버(FastAPI) | `/healthz`·`/readyz`·`/api/info`·`/api/writes`·`/api/writes/summary`·`/metrics`·화면(`/`) |
 | 장부 `demo.seq_write` | 순번 `n`(UNIQUE) + 쓴 시각 + 쓴 환경(`written_env`). PoC 표(echo-infra PR #18)에 `written_env` 칸만 더했다 |
 | 화면(`app/static/index.html`) | 직렬 쓰기, 지금 순번·응답 환경 배지, 장부 대조 숫자, 꼬리 손실 경고, 최근 60건 환경 띠 |
 
@@ -39,7 +39,7 @@ Team Echo 이전 시연용 **관리 대상 앱**(웹앱 + PostgreSQL 순번 쓰�
 
 ## 기술 스택
 
-Python 3.13, FastAPI, psycopg 3 + psycopg_pool(`prepare_threshold=None` — PgBouncer transaction 모드에서 서버 측 prepared statement 를 쓰지 않는다), pydantic-settings, uvicorn, uv. 화면은 빌드 단계 없는 HTML·CSS·JS 한 장(외부 CDN·폰트 없음). 로컬·CI DB 는 PostgreSQL 17 + PgBouncer 1.26(`edoburu/pgbouncer`).
+Python 3.13, FastAPI, prometheus_client(`/metrics`), psycopg 3 + psycopg_pool(`prepare_threshold=None` — PgBouncer transaction 모드에서 서버 측 prepared statement 를 쓰지 않는다), pydantic-settings, uvicorn, uv. 화면은 빌드 단계 없는 HTML·CSS·JS 한 장(외부 CDN·폰트 없음). 로컬·CI DB 는 PostgreSQL 17 + PgBouncer 1.26(`edoburu/pgbouncer`).
 
 ## 디렉터리 구조
 
@@ -132,6 +132,7 @@ SELECT written_env, count(*), min(n), max(n) FROM demo.seq_write GROUP BY writte
 | `GET /api/info` | 200 `{"environment","hostname","version"}` |
 | `POST /api/writes` | 201 `{"n","environment","hostname","wroteAt"}` / 503 `{"error":"DB_UNAVAILABLE"}` |
 | `GET /api/writes/summary` | 200 `{"environment","total","distinct","minN","maxN","missing","duplicates","byEnvironment":[…],"recent":[…]}` / 503 |
+| `GET /metrics` | 200 Prometheus 텍스트 — `http_requests_total{method,path,status}`·`http_request_duration_seconds{method,path}`. `path` 는 경로 템플릿(없는 경로는 `unmatched`). DB 를 보지 않는다 ([SPEC infra-9](specs/infra-9-metrics.md)) |
 | `GET /` | 화면 (HTML) |
 
 자세한 형식은 [SPEC 4절](specs/infra-4-demo-app.md#4-인터페이스).
@@ -161,6 +162,7 @@ ghcr.io/softbank-hackathon-2026-team-echo/echo-demo-app:sha-<커밋 전체>   # 
 ## 문서
 
 - [specs/infra-4-demo-app.md](specs/infra-4-demo-app.md) — 범위·결정·인터페이스·완료 기준
+- [specs/infra-9-metrics.md](specs/infra-9-metrics.md) — `/metrics`(클러스터 OTel 수집기가 긁는 지표)
 - [CLAUDE.md](CLAUDE.md) — 작업 규칙(PgBouncer 제약·장부 표 규칙·도구)
 - [.claude/rules/git-conventions.md](.claude/rules/git-conventions.md) — 커밋·브랜치·PR 규칙
 - GitHub 이슈: https://github.com/Softbank-Hackathon-2026-Team-Echo/echo-infra/issues/4

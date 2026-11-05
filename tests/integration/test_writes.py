@@ -127,3 +127,15 @@ async def test_readyz_with_db_returns_ready(database_url: str) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready"}
+
+
+async def test_metrics_counts_successful_writes_as_201(
+    database_url: str, empty_ledger: psycopg.Connection
+) -> None:
+    async with running_client(make_settings(database_url)) as client:
+        for _ in range(3):
+            assert (await client.post("/api/writes")).status_code == 201
+        text = (await client.get("/metrics")).text
+
+    assert 'http_requests_total{method="POST",path="/api/writes",status="201"} 3.0' in text
+    assert 'http_request_duration_seconds_count{method="POST",path="/api/writes"} 3.0' in text
