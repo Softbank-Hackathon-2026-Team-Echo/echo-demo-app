@@ -5,6 +5,7 @@ description = "Team Echo 이전 시연용 관리 대상 앱 (웹앱 + PostgreSQL
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.162.0",
+    "prometheus-client>=0.23",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic-settings>=2.16.2",
     "uvicorn>=0.54.0",

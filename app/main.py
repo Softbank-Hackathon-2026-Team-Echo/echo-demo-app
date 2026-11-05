@@ -14,6 +14,7 @@ from app import ledger
 from app.config import Settings
 from app.db import SchemaState, check_ready, create_pool
 from app.json_logging import configure_logging
+from app.metrics import HttpMetrics, MetricsMiddleware
 from app.schemas import (
     ErrorResponse,
     HealthResponse,
@@ -100,6 +101,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    # 마지막에 더한 미들웨어가 가장 바깥이다 → no-store 를 포함한 모든 처리 시간을 잰다.
+    metrics = HttpMetrics()
+    app.add_middleware(MetricsMiddleware, metrics=metrics)
+
     @app.get("/healthz")
     async def healthz() -> HealthResponse:
         # 프로세스 생존만 본다. DB 를 보면 컷오버 중 PgBouncer PAUSE 동안 파드가 재시작된다.
@@ -156,6 +161,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except psycopg.Error as exc:
             return _db_unavailable("seq_summary", exc)
         return SummaryResponse.from_summary(summary, ctx.settings.environment)
+
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics() -> Response:
+        # 클러스터 OTel 수집기(echo-infra 인프라 9)가 긁는다. DB 를 보지 않는다.
+        body, content_type = metrics.render()
+        return Response(content=body, media_type=content_type)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
