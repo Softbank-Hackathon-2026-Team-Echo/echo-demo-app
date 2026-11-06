@@ -30,6 +30,7 @@ Team Echo 이전 시연용 **관리 대상 앱**(웹앱 + PostgreSQL 순번 쓰�
 ## 핵심 흐름
 
 1. **순번 쓰기** `POST /api/writes` — 한 트랜잭션에서 `pg_advisory_xact_lock` 으로 줄을 세운 뒤 `INSERT … SELECT COALESCE(max(n),0)+1` 로 번호를 매긴다. 동시에 들어와도 번호가 겹치거나 비지 않는다. 트랜잭션 잠금이라 PgBouncer transaction 모드에서 안전하다.
+   - 멱등 쓰기(`IDEMPOTENT_WRITES=true`, 인프라 12.4): 같은 잠금 안에서 `request_id` 를 먼저 찾고, 있으면 그 행을 200 으로 돌려준다. 진입점 요청 기록을 승격된 DB 에 다시 보낼 때 이미 있는 쓰기를 건너뛰기 위해서다.
 2. **장부 대조** `GET /api/writes/summary` — 같은 시점(REPEATABLE READ)에서 `total`·`distinct`·`minN`·`maxN`·`missing = (maxN − minN + 1) − distinct`·`duplicates = total − distinct`·환경별 건수·최근 10건을 읽는다.
 3. **화면** — [쓰기 시작]을 누르면 응답을 받은 뒤 200ms(`?interval=50~5000`) 쉬고 다음 요청을 보낸다(요청 하나 제한 10초). 장부는 1초마다 따로 읽는다.
    - 응답이 1초 넘게 안 오면 "응답 대기 중 N.N초"(컷오버 쓰기 정지가 보인다).
@@ -82,6 +83,7 @@ docker compose down -v
 | `ECHO_ENVIRONMENT` | 응답 환경 이름(`aws-tokyo`·`gcp-seoul`·`onprem…`) | `unknown` |
 | `APP_VERSION` | 표시용 버전(커밋 등) | `dev` |
 | `AUTO_MIGRATE` | 시작 때 `sql/schema.sql` 실행 | `true` |
+| `IDEMPOTENT_WRITES` | 켜면 `POST /api/writes` 가 `Idempotency-Key`(없으면 `x-request-id`)로 다시 온 요청에 새 행 대신 처음 결과를 200 으로 돌려준다(인프라 12.4, [SPEC](specs/infra-12.4-idempotent-writes.md)) | `false` |
 | `PORT` | 듣는 포트 | `8080` |
 | `LOG_LEVEL` | 로그 수준 | `INFO` |
 

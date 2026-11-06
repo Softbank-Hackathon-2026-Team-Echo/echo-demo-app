@@ -13,3 +13,9 @@ CREATE TABLE IF NOT EXISTS demo.seq_write (
 
 -- PoC 표(written_env 없음)에 칸만 더한다.
 ALTER TABLE demo.seq_write ADD COLUMN IF NOT EXISTS written_env text NOT NULL DEFAULT 'unknown';
+
+-- 멱등 쓰기(인프라 12.4): 같은 요청 키로 다시 보내면 새 행 대신 기존 행을 돌려준다. NULL 허용이라 키 없는 쓰기·기존 행은 그대로.
+-- 운영에서는 서울 B 에 먼저, 그 다음 도쿄 A 에 적용한다(논리 복제는 DDL 을 옮기지 않는다 — specs/infra-12.4-idempotent-writes.md 5절).
+ALTER TABLE demo.seq_write ADD COLUMN IF NOT EXISTS request_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS seq_write_request_id_key
+  ON demo.seq_write (request_id) WHERE request_id IS NOT NULL;

@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 
 INDEX_HTML = Path(__file__).resolve().parent / "static" / "index.html"
 DB_UNAVAILABLE = "DB_UNAVAILABLE"
+REQUEST_ID_TOO_LONG = "REQUEST_ID_TOO_LONG"
+MAX_REQUEST_ID_LENGTH = 200
+
+
+def _request_id(request: Request) -> str | None:
+    """멱등 키: Idempotency-Key, 없으면 진입점 Envoy 가 붙이는 x-request-id. 둘 다 없으면 None."""
+    for header in ("idempotency-key", "x-request-id"):
+        value = request.headers.get(header, "").strip()
+        if value:
+            return value
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,20 +143,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "/api/writes",
         status_code=status.HTTP_201_CREATED,
         response_model=WriteResponse,
-        responses={503: {"model": ErrorResponse}},
+        responses={
+            200: {"model": WriteResponse, "description": "같은 멱등 키로 이미 쓴 요청"},
+            400: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
     )
     async def create_write(request: Request) -> WriteResponse | JSONResponse:
         ctx = _context(request)
+        request_id = _request_id(request) if ctx.settings.idempotent_writes else None
+        if request_id is not None and len(request_id) > MAX_REQUEST_ID_LENGTH:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(error=REQUEST_ID_TOO_LONG).model_dump(by_alias=True),
+            )
         try:
             await ctx.schema.ensure()
-            row = await ledger.insert_next(ctx.pool, ctx.settings.environment)
+            if request_id is None:
+                row = await ledger.insert_next(ctx.pool, ctx.settings.environment)
+            else:
+                written = await ledger.insert_next_idempotent(
+                    ctx.pool, ctx.settings.environment, request_id
+                )
         except psycopg.Error as exc:
             return _db_unavailable("seq_write", exc)
-        return WriteResponse(
-            n=row.n,
-            environment=ctx.settings.environment,
+        if request_id is None:
+            return WriteResponse(
+                n=row.n,
+                environment=ctx.settings.environment,
+                hostname=ctx.hostname,
+                wrote_at=row.wrote_at,
+            )
+        body = WriteResponse(
+            n=written.row.n,
+            environment=written.environment,
             hostname=ctx.hostname,
-            wrote_at=row.wrote_at,
+            wrote_at=written.row.wrote_at,
+        )
+        if written.created:
+            return body
+        # 같은 키로 다시 온 요청: 새로 쓰지 않고 처음 결과를 200 으로 돌려준다
+        # (재생 스크립트가 201 과 구분, 인프라 12.4).
+        return JSONResponse(
+            status_code=status.HTTP_200_OK, content=body.model_dump(by_alias=True, mode="json")
         )
 
     @app.get(

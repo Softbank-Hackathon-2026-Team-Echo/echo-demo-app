@@ -20,6 +20,18 @@ SELECT COALESCE(max(n), 0) + 1, %s FROM demo.seq_write
 RETURNING n, wrote_at
 """
 
+# 멱등 쓰기(인프라 12.4). 같은 쓰기 잠금 안에서 찾고 없으면 넣으므로
+# 같은 키가 동시에 와도 행은 하나다.
+_FIND_BY_REQUEST_ID_SQL = """
+SELECT n, wrote_at, written_env FROM demo.seq_write WHERE request_id = %s
+"""
+
+_INSERT_NEXT_WITH_REQUEST_ID_SQL = """
+INSERT INTO demo.seq_write (n, written_env, request_id)
+SELECT COALESCE(max(n), 0) + 1, %s, %s FROM demo.seq_write
+RETURNING n, wrote_at
+"""
+
 _TOTALS_SQL = "SELECT count(*), count(DISTINCT n), min(n), max(n) FROM demo.seq_write"
 
 _BY_ENVIRONMENT_SQL = """
@@ -41,6 +53,13 @@ LIMIT %s
 class WrittenRow:
     n: int
     wrote_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotentWrite:
+    row: WrittenRow
+    environment: str
+    created: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +112,38 @@ async def insert_next(pool: AsyncConnectionPool, environment: str) -> WrittenRow
         if row is None:
             raise RuntimeError("INSERT … RETURNING returned no row")
         return WrittenRow(n=row[0], wrote_at=row[1])
+    raise AssertionError("unreachable")
+
+
+async def insert_next_idempotent(
+    pool: AsyncConnectionPool, environment: str, request_id: str
+) -> IdempotentWrite:
+    """같은 request_id 가 이미 있으면 그 행을, 없으면 새 번호로 넣은 행을 돌려준다."""
+    for attempt in range(1, _MAX_WRITE_ATTEMPTS + 1):
+        try:
+            async with pool.connection() as conn, conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(%s)", (SEQ_WRITE_LOCK_KEY,))
+                cursor = await conn.execute(_FIND_BY_REQUEST_ID_SQL, (request_id,))
+                found = await cursor.fetchone()
+                if found is not None:
+                    return IdempotentWrite(
+                        row=WrittenRow(n=found[0], wrote_at=found[1]),
+                        environment=found[2],
+                        created=False,
+                    )
+                cursor = await conn.execute(
+                    _INSERT_NEXT_WITH_REQUEST_ID_SQL, (environment, request_id)
+                )
+                row = await cursor.fetchone()
+        except psycopg.errors.UniqueViolation:
+            if attempt == _MAX_WRITE_ATTEMPTS:
+                raise
+            continue
+        if row is None:
+            raise RuntimeError("INSERT … RETURNING returned no row")
+        return IdempotentWrite(
+            row=WrittenRow(n=row[0], wrote_at=row[1]), environment=environment, created=True
+        )
     raise AssertionError("unreachable")
 
 
