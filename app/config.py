@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     echo_environment: str = UNKNOWN_ENVIRONMENT
     app_version: str = "dev"
     auto_migrate: bool = True
+    # 멱등 쓰기(인프라 12.4). 켜면 POST /api/writes 가 Idempotency-Key(없으면 x-request-id)로
+    # 다시 보낸 요청을 알아본다.
+    idempotent_writes: bool = False
     port: int = Field(default=8080, ge=1, le=65535)
     log_level: str = "INFO"
 

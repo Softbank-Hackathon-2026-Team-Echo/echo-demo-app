@@ -33,7 +33,7 @@ async def test_startup_creates_schema_when_missing(
     admin_conn.execute("DROP SCHEMA IF EXISTS demo CASCADE")
 
     async with running_client(make_settings(database_url)) as client:
-        assert _columns(admin_conn) == ["id", "n", "wrote_at", "written_env"]
+        assert _columns(admin_conn) == ["id", "n", "wrote_at", "written_env", "request_id"]
         response = await client.post("/api/writes")
 
     assert response.status_code == 201
@@ -50,7 +50,7 @@ async def test_startup_adds_written_env_to_poc_table(
         body = (await client.post("/api/writes")).json()
         summary = (await client.get("/api/writes/summary")).json()
 
-    assert _columns(admin_conn) == ["id", "n", "wrote_at", "written_env"]
+    assert _columns(admin_conn) == ["id", "n", "wrote_at", "written_env", "request_id"]
     assert body["n"] == 3
     assert summary["byEnvironment"] == [
         {"environment": "unknown", "count": 2, "minN": 1, "maxN": 2},
