@@ -210,6 +210,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        return FileResponse(INDEX_HTML, media_type="text/html; charset=utf-8")
+        return FileResponse(INDEX_HTML, media_type="text/html; charset=utf-8"
 
     return app
