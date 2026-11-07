@@ -29,7 +29,9 @@ WORKDIR /app
 # 같은 이유로 apt(apt·libapt-pkg7.0)도 지운다. 실행 이미지는 패키지를 설치하지 않으므로
 # 패키지 관리자가 필요 없고, 베이스 이미지에 새 수정판이 나올 때마다 FAIL 이 되는 것을 막는다.
 # dpkg 는 남긴다(Debian 필수 패키지이고, Trivy 가 OS 패키지 목록을 읽는 자리다).
-RUN dpkg --purge --force-remove-protected apt libapt-pkg7.0 && \
+# apt 를 지우기 전에 zlib1g 만 보안 수정판(DSA-6613-1, +deb13u1)으로 올린다. 베이스 이미지가 아직 옛 판이라서다.
+RUN apt-get update && apt-get install -y --only-upgrade --no-install-recommends zlib1g && \
+    dpkg --purge --force-remove-protected apt libapt-pkg7.0 && \
     rm -rf /var/lib/apt /var/cache/apt /var/log/apt /etc/apt && \
     python -m pip uninstall --yes --no-cache-dir pip && \
     groupadd --system --gid 1001 app && \
