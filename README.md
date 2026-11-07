@@ -168,3 +168,5 @@ ghcr.io/softbank-hackathon-2026-team-echo/echo-demo-app:sha-<커밋 전체>   # 
 - [CLAUDE.md](CLAUDE.md) — 작업 규칙(PgBouncer 제약·장부 표 규칙·도구)
 - [.claude/rules/git-conventions.md](.claude/rules/git-conventions.md) — 커밋·브랜치·PR 규칙
 - GitHub 이슈: https://github.com/Softbank-Hackathon-2026-Team-Echo/echo-infra/issues/4
+
+> [시험 d4a-20261107] EchoPort GitHub App 쓰기 시험용 한 줄입니다. 병합하지 않고 닫은 뒤 브랜치를 지웁니다.
