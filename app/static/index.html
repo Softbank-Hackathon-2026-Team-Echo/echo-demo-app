@@ -127,7 +127,7 @@
   const KNOWN_NAMES = { "aws-tokyo": "AWS 도쿄", "gcp-seoul": "GCP 서울" };
 
   const parsed = Number.parseInt(new URLSearchParams(location.search).get("interval") ?? "", 10);
-  const intervalMs = Number.isFinite(parsed) ? Math.min(5000, Math.max(50, parsed)) : 200;
+  const intervalMs = Number.isFinite(parsed) ? Math.min(5000, Math.max(50, parsed)) : 1000;
 
   const $ = (id) => document.getElementById(id);
   const fmt = (v) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("ko-KR"));
