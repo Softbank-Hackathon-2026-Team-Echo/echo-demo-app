@@ -9,7 +9,7 @@
   :root {
     --bg: #0f1419; --panel: #182029; --line: #2a3542; --text: #e8edf2; --muted: #8a97a6;
     --aws: #ff9900; --gcp: #4285f4; --onprem: #34a853; --other: #8a8f98;
-    --ok: #3fb950; --fail: #f85149; --wait: #d29922;
+    --ok: #3fb950; --fail: #f85149; --wait: #d29922; --slow: #ffd33d;
   }
   * { box-sizing: border-box; }
   body {
@@ -41,13 +41,15 @@
   .banner { margin-top: 12px; padding: 12px 18px; border-radius: 12px; font-size: 24px; font-weight: 700; }
   #waiting { background: rgba(210,153,34,.15); color: var(--wait); border: 1px solid var(--wait); }
   #tail-loss { background: rgba(248,81,73,.15); color: var(--fail); border: 2px solid var(--fail); }
-  .stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 14px; }
-  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  .stats { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; margin-top: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px;
     display: flex; flex-direction: column; justify-content: space-between; }
-  .stat .label { font-size: 15px; }
-  .stat .value { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat .label { font-size: 14px; }
+  .stat .value { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .stat.bad .value { color: var(--fail); }
   .stat.good .value { color: var(--ok); }
+  .stat.slow .value { color: var(--slow); }
+  #run-state .retrying { color: var(--slow); font-weight: 700; }
   h2 { font-size: 18px; color: var(--muted); font-weight: 600; margin: 18px 0 8px; display: flex; justify-content: space-between; }
   #strip { display: grid; grid-template-columns: repeat(60, 1fr); gap: 3px; height: 34px; }
   #strip span { border-radius: 3px; background: #222b35; }
@@ -56,6 +58,15 @@
   #strip span.onprem { background: var(--onprem); }
   #strip span.other { background: var(--other); }
   #strip span.fail { background: repeating-linear-gradient(45deg, var(--fail) 0 3px, #3a1416 3px 6px); }
+  /* 지연(임계 이상 걸린 성공): 환경색 위에 노랑 줄무늬 + 노랑 테두리. 실패(빨강)와 구분된다. */
+  #strip span.slow { background-image: repeating-linear-gradient(135deg, var(--slow) 0 3px, transparent 3px 7px);
+    box-shadow: inset 0 0 0 2px var(--slow); }
+  #strip-legend { display: flex; gap: 14px; align-items: center; font-size: 15px; }
+  #strip-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+  #strip-legend i.fast { background: var(--aws); }
+  #strip-legend i.slow { background: var(--aws); background-image: repeating-linear-gradient(135deg, var(--slow) 0 3px, transparent 3px 7px);
+    box-shadow: inset 0 0 0 2px var(--slow); }
+  #strip-legend i.fail { background: repeating-linear-gradient(45deg, var(--fail) 0 3px, #3a1416 3px 6px); }
   table { width: 100%; border-collapse: collapse; font-size: 20px; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
   th { color: var(--muted); font-weight: 600; font-size: 16px; }
@@ -99,13 +110,15 @@
     <div class="stat"><div class="label">보낸 수</div><div class="value" id="s-sent">0</div></div>
     <div class="stat good"><div class="label">성공</div><div class="value" id="s-ok">0</div></div>
     <div class="stat" id="s-fail-box"><div class="label">실패</div><div class="value" id="s-fail">0</div></div>
+    <div class="stat" id="s-slow-box"><div class="label">지연된 요청</div><div class="value" id="s-slow">0</div></div>
+    <div class="stat" id="s-max-box"><div class="label">최대 지연(초)</div><div class="value" id="s-max">—</div></div>
     <div class="stat"><div class="label">마지막 확인 번호</div><div class="value" id="s-confirmed">—</div></div>
     <div class="stat"><div class="label">장부 최대 번호</div><div class="value" id="s-ledger-max">—</div></div>
     <div class="stat" id="s-missing-box"><div class="label">누락</div><div class="value" id="s-missing">—</div></div>
     <div class="stat" id="s-dup-box"><div class="label">중복</div><div class="value" id="s-dup">—</div></div>
   </section>
 
-  <h2><span>최근 60건 응답 환경 (왼쪽이 오래된 것)</span><span id="strip-legend"></span></h2>
+  <h2><span>최근 60건 응답 환경 (왼쪽이 오래된 것)</span><span id="strip-legend"><span><i class="fast"></i>성공(환경색)</span><span><i class="slow"></i>지연 <b id="slow-threshold">3</b>초 이상·재시도 끝 성공</span><span><i class="fail"></i>실패</span></span></h2>
   <div id="strip"></div>
 
   <h2><span>환경별 장부 건수</span><span id="ledger-state"></span></h2>
@@ -119,15 +132,33 @@
 "use strict";
 (() => {
   const STRIP_SIZE = 60;
-  const WRITE_TIMEOUT_MS = 10000;
-  const SUMMARY_TIMEOUT_MS = 5000;
+  // 무중단(#23): 전환 최대 31.4초·복귀 최대 23.4초(실측)보다 널널하게 기다린다.
+  const WRITE_TIMEOUT_MS = 60000;   // 요청 하나 제한
+  const SUMMARY_TIMEOUT_MS = 30000; // 조회(장부·환경) 제한
+  const RETRY_WINDOW_MS = 60000;    // 같은 Idempotency-Key 로 다시 보내는 기간(첫 전송부터)
+  const RETRY_EVERY_MS = 1000;      // 재시도 간격
+  const RETRY_STATUSES = new Set([502, 503, 504]);
   const SUMMARY_EVERY_MS = 1000;
   const INFO_EVERY_MS = 2000;
   const WAIT_SHOW_AFTER_MS = 1000;
   const KNOWN_NAMES = { "aws-tokyo": "AWS 도쿄", "gcp-seoul": "GCP 서울" };
 
-  const parsed = Number.parseInt(new URLSearchParams(location.search).get("interval") ?? "", 10);
+  const params = new URLSearchParams(location.search);
+  const parsed = Number.parseInt(params.get("interval") ?? "", 10);
   const intervalMs = Number.isFinite(parsed) ? Math.min(5000, Math.max(50, parsed)) : 1000;
+  // 이 시간(ms) 이상 걸린 성공은 「지연」으로 칠하고 센다. ?slow=3000 으로 조절.
+  const parsedSlow = Number.parseInt(params.get("slow") ?? "", 10);
+  const slowMs = Number.isFinite(parsedSlow) ? Math.min(60000, Math.max(100, parsedSlow)) : 3000;
+
+  // 멱등 키. crypto.randomUUID 는 https·localhost 에서만 있어서 getRandomValues 로 v4 를 만든다.
+  function newIdempotencyKey() {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
 
   const $ = (id) => document.getElementById(id);
   const fmt = (v) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("ko-KR"));
@@ -148,7 +179,9 @@
 
   const state = {
     running: false, loopActive: false, inflightSince: null,
-    sent: 0, ok: 0, fail: 0,
+    sent: 0, ok: 0, fail: 0,   // fail = 재시도를 다 쓰고도 실패한 요청만
+    slow: 0, maxLatencyMs: 0, // slow = 임계 이상 걸린 성공(재시도 끝 성공 포함)
+    retrying: 0,              // 지금 요청의 재시도 횟수(같은 키)
     current: null,          // 가장 최근 201 응답
     confirmedMax: 0,        // 201 로 확인 받은 가장 큰 번호
     ledger: null,           // 마지막 summary
@@ -177,31 +210,66 @@
     $("env-host").textContent = host ? `${host}` : "";
   }
 
-  function pushStrip(env) {
-    state.strip.push(env);
+  // 띠 한 칸: { env, slow, ms }. env 가 null 이면 실패(재시도 소진).
+  function pushStrip(env, slow, ms) {
+    state.strip.push({ env, slow, ms });
     if (state.strip.length > STRIP_SIZE) state.strip.shift();
   }
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // 쓰기 하나. 네트워크 오류·502/503/504·시간 초과면 같은 Idempotency-Key 로
+  // 1초 간격으로 다시 보낸다(첫 전송부터 60초까지). 서버가 같은 키를 알아보므로 중복 행이 없다.
+  // 응답 시간은 첫 전송부터 마지막 응답까지(재시도 포함)로 잰다.
   async function writeOnce() {
     state.sent += 1;
-    state.inflightSince = performance.now();
+    const key = newIdempotencyKey();
+    const started = performance.now();
+    state.inflightSince = started;
+    state.retrying = 0;
     render();
+    let body = null;
     try {
-      const { status, body } = await fetchJson("/api/writes", { method: "POST" }, WRITE_TIMEOUT_MS);
-      if (status === 201 && body && Number.isInteger(body.n)) {
+      for (;;) {
+        let retryable;
+        try {
+          const res = await fetchJson(
+            "/api/writes",
+            { method: "POST", headers: { "Idempotency-Key": key } },
+            WRITE_TIMEOUT_MS,
+          );
+          // 201 = 새로 씀, 200 = 같은 키로 이미 쓴 요청(앞 시도가 커밋된 뒤 응답만 잃은 경우).
+          if ((res.status === 201 || res.status === 200) && res.body && Number.isInteger(res.body.n)) {
+            body = res.body;
+            break;
+          }
+          retryable = RETRY_STATUSES.has(res.status);
+        } catch (_err) {
+          retryable = true;  // 시간 초과(60초)·연결 실패
+        }
+        // [멈춤]을 눌러도 지금 요청은 끝까지 재시도한다(꼬리 손실 판정을 흐리지 않게).
+        if (!retryable) break;
+        if (performance.now() - started + RETRY_EVERY_MS > RETRY_WINDOW_MS) break;
+        state.retrying += 1;
+        render();
+        await sleep(RETRY_EVERY_MS);
+      }
+    } finally {
+      const ms = performance.now() - started;
+      if (body) {
+        const slow = ms >= slowMs || state.retrying > 0;
         state.ok += 1;
+        if (slow) state.slow += 1;
+        state.maxLatencyMs = Math.max(state.maxLatencyMs, ms);
         state.current = body;
         state.confirmedMax = Math.max(state.confirmedMax, body.n);
         setBadge(body.environment, body.hostname);
-        pushStrip(body.environment);
+        pushStrip(body.environment, slow, ms);
       } else {
-        state.fail += 1;
-        pushStrip(null);
+        state.fail += 1;  // 재시도를 다 쓰고도 실패(또는 400 같은 재시도 안 하는 응답)
+        pushStrip(null, false, ms);
       }
-    } catch (_err) {
-      state.fail += 1;  // 시간 초과(10초)·연결 실패
-      pushStrip(null);
-    } finally {
+      state.retrying = 0;
       state.inflightSince = null;
       render();
     }
@@ -277,13 +345,24 @@
     $("s-ok").textContent = fmt(state.ok);
     $("s-fail").textContent = fmt(state.fail);
     $("s-fail-box").classList.toggle("bad", state.fail > 0);
+    $("s-slow").textContent = fmt(state.slow);
+    $("s-slow-box").classList.toggle("slow", state.slow > 0);
+    $("s-max").textContent = state.ok > 0 ? (state.maxLatencyMs / 1000).toFixed(1) : "—";
+    $("s-max-box").classList.toggle("slow", state.maxLatencyMs >= slowMs);
     $("s-confirmed").textContent = state.confirmedMax > 0 ? fmt(state.confirmedMax) : "—";
 
     $("start").disabled = state.running;
     $("stop").disabled = !state.running;
-    $("run-state").textContent = state.running
+    const runState = $("run-state");
+    runState.textContent = state.running
       ? `쓰는 중 · 요청 간격 ${intervalMs}ms`
       : state.loopActive ? "멈추는 중 (마지막 응답 대기)" : `멈춤 · 요청 간격 ${intervalMs}ms`;
+    if (state.retrying > 0) {
+      const retry = document.createElement("span");
+      retry.className = "retrying";
+      retry.textContent = ` · 재시도 중 ${state.retrying}`;
+      runState.append(retry);
+    }
 
     const ledger = state.ledger;
     $("s-ledger-max").textContent = ledger ? fmt(ledger.maxN) : "—";
@@ -315,9 +394,10 @@
       const cell = document.createElement("span");
       const offset = STRIP_SIZE - state.strip.length;
       if (i >= offset) {
-        const env = state.strip[i - offset];
-        cell.className = env === null ? "fail" : envClass(env);
-        cell.title = env === null ? "실패" : envName(env);
+        const { env, slow, ms } = state.strip[i - offset];
+        const secs = `${(ms / 1000).toFixed(1)}초`;
+        cell.className = env === null ? "fail" : `${envClass(env)}${slow ? " slow" : ""}`;
+        cell.title = env === null ? `실패 · ${secs}` : `${envName(env)} · ${secs}${slow ? " · 지연" : ""}`;
       }
       return cell;
     }));
@@ -358,6 +438,7 @@
     render();
   });
 
+  $("slow-threshold").textContent = String(Number((slowMs / 1000).toFixed(1)));
   setInterval(renderWaiting, 100);
   render();
   pollInfo();

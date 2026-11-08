@@ -30,9 +30,12 @@ Team Echo 이전 시연용 **관리 대상 앱**(웹앱 + PostgreSQL 순번 쓰�
 ## 핵심 흐름
 
 1. **순번 쓰기** `POST /api/writes` — 한 트랜잭션에서 `pg_advisory_xact_lock` 으로 줄을 세운 뒤 `INSERT … SELECT COALESCE(max(n),0)+1` 로 번호를 매긴다. 동시에 들어와도 번호가 겹치거나 비지 않는다. 트랜잭션 잠금이라 PgBouncer transaction 모드에서 안전하다.
-   - 멱등 쓰기(`IDEMPOTENT_WRITES=true`, 인프라 12.4): 같은 잠금 안에서 `request_id` 를 먼저 찾고, 있으면 그 행을 200 으로 돌려준다. 진입점 요청 기록을 승격된 DB 에 다시 보낼 때 이미 있는 쓰기를 건너뛰기 위해서다.
+   - 멱등 쓰기(`IDEMPOTENT_WRITES=true`, 인프라 12.4): 같은 잠금 안에서 `request_id` 를 먼저 찾고, 있으면 그 행을 200 으로 돌려준다. 진입점 요청 기록을 승격된 DB 에 다시 보낼 때 이미 있는 쓰기를 건너뛰기 위해서다. 손님 화면이 같은 키로 재시도하므로 기본으로 켠다(#23).
+   - 쓰기 붙잡기(#23 a안, `app/write_hold.py`): 온프레 복귀 freeze(SQLSTATE `25006`)·풀 대기 초과는 503 대신 0.25초 간격으로 최대 20초 다시 시도한다(`WRITE_HOLD_SECONDS`·`WRITE_HOLD_INTERVAL_SECONDS`). 연결 끊김은 커밋 여부를 모를 수 있어 멱등 키가 있을 때만 다시 보낸다. 20초를 넘기면 503. 최악 응답 시간 ≈ 붙잡기 20초 + 한 시도의 풀 대기 20초.
 2. **장부 대조** `GET /api/writes/summary` — 같은 시점(REPEATABLE READ)에서 `total`·`distinct`·`minN`·`maxN`·`missing = (maxN − minN + 1) − distinct`·`duplicates = total − distinct`·환경별 건수·최근 10건을 읽는다.
-3. **화면** — [쓰기 시작]을 누르면 응답을 받은 뒤 1000ms(`?interval=50~5000`) 쉬고 다음 요청을 보낸다(요청 하나 제한 10초). 장부는 1초마다 따로 읽는다.
+3. **화면** — [쓰기 시작]을 누르면 응답을 받은 뒤 1000ms(`?interval=50~5000`) 쉬고 다음 요청을 보낸다(요청 하나 제한 60초, 장부·환경 조회 제한 30초). 장부는 1초마다 따로 읽는다.
+   - 쓰기마다 `Idempotency-Key`(uuid)를 붙이고, 네트워크 오류·502/503/504·시간 초과면 **같은 키로 1초 간격, 첫 전송부터 60초까지** 다시 보낸다(서버가 같은 키를 알아봐 중복 행이 없다). 「실패」는 재시도를 다 쓴 요청만 센다. 재시도 중이면 상단에 「재시도 중 N」.
+   - 응답 시간(첫 전송~마지막 응답)이 `?slow=3000`(ms, 100~60000) 이상이거나 재시도 끝에 성공하면 「지연」: 띠에 노랑 줄무늬·테두리, 「지연된 요청」 수와 「최대 지연(초)」 칸에 센다. 실패는 빨강.
    - 응답이 1초 넘게 안 오면 "응답 대기 중 N.N초"(컷오버 쓰기 정지가 보인다).
    - 201 로 확인 받은 가장 큰 번호가 장부 최대보다 크면 빨간 경고 "꼬리 손실 의심"(쓰기 정지 없이 끊긴 경우).
    - 최근 60건 응답을 환경 색(AWS 주황·GCP 파랑·온프레 초록)으로 칠해 도쿄 → 서울 전환 순간이 색 경계로 보인다.
@@ -83,7 +86,10 @@ docker compose down -v
 | `ECHO_ENVIRONMENT` | 응답 환경 이름(`aws-tokyo`·`gcp-seoul`·`onprem…`) | `unknown` |
 | `APP_VERSION` | 표시용 버전(커밋 등) | `dev` |
 | `AUTO_MIGRATE` | 시작 때 `sql/schema.sql` 실행 | `true` |
-| `IDEMPOTENT_WRITES` | 켜면 `POST /api/writes` 가 `Idempotency-Key`(없으면 `x-request-id`)로 다시 온 요청에 새 행 대신 처음 결과를 200 으로 돌려준다(인프라 12.4, [SPEC](specs/infra-12.4-idempotent-writes.md)) | `false` |
+| `IDEMPOTENT_WRITES` | 켜면 `POST /api/writes` 가 `Idempotency-Key`(없으면 `x-request-id`)로 다시 온 요청에 새 행 대신 처음 결과를 200 으로 돌려준다(인프라 12.4, [SPEC](specs/infra-12.4-idempotent-writes.md)) | `true` |
+| `DB_POOL_TIMEOUT_SECONDS` | 풀에서 연결을 기다리는 최대 시간(한 시도) | `20` |
+| `WRITE_HOLD_SECONDS` | 쓰기 붙잡기 최대 시간(`25006`·풀 대기 초과·멱등 키 있는 연결 끊김). `0` 이면 붙잡지 않고 바로 503 | `20` |
+| `WRITE_HOLD_INTERVAL_SECONDS` | 붙잡기 재시도 간격 | `0.25` |
 | `PORT` | 듣는 포트 | `8080` |
 | `LOG_LEVEL` | 로그 수준 | `INFO` |
 

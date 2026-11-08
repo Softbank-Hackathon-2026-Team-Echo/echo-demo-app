@@ -23,6 +23,7 @@ from app.schemas import (
     SummaryResponse,
     WriteResponse,
 )
+from app.write_hold import hold_retry
 
 logger = logging.getLogger(__name__)
 
@@ -157,23 +158,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=ErrorResponse(error=REQUEST_ID_TOO_LONG).model_dump(by_alias=True),
             )
-        try:
+
+        async def write_once() -> ledger.WrittenRow | ledger.IdempotentWrite:
             await ctx.schema.ensure()
             if request_id is None:
-                row = await ledger.insert_next(ctx.pool, ctx.settings.environment)
-            else:
-                written = await ledger.insert_next_idempotent(
-                    ctx.pool, ctx.settings.environment, request_id
-                )
+                return await ledger.insert_next(ctx.pool, ctx.settings.environment)
+            return await ledger.insert_next_idempotent(
+                ctx.pool, ctx.settings.environment, request_id
+            )
+
+        try:
+            # 복귀 freeze(25006)·재연결·풀 대기 초과는 503 대신 붙잡아 다시 시도한다(#23 a안).
+            result = await hold_retry(
+                write_once,
+                idempotent=request_id is not None,
+                hold_seconds=ctx.settings.write_hold_seconds,
+                interval_seconds=ctx.settings.write_hold_interval_seconds,
+            )
         except psycopg.Error as exc:
             return _db_unavailable("seq_write", exc)
-        if request_id is None:
+        if isinstance(result, ledger.WrittenRow):
             return WriteResponse(
-                n=row.n,
+                n=result.n,
                 environment=ctx.settings.environment,
                 hostname=ctx.hostname,
-                wrote_at=row.wrote_at,
+                wrote_at=result.wrote_at,
             )
+        written = result
         body = WriteResponse(
             n=written.row.n,
             environment=written.environment,
