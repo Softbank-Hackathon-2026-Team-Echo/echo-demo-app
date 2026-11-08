@@ -14,6 +14,9 @@ def make_settings(database_url: str, **overrides: Any) -> Settings:
         "echo_environment": "aws-tokyo",
         "app_version": "test",
         "db_pool_timeout_seconds": 5.0,
+        # 붙잡기 기본(20초)은 시험을 느리게 하므로 짧게 둔다. 붙잡기 시험은 따로 넘긴다.
+        "write_hold_seconds": 0.5,
+        "write_hold_interval_seconds": 0.05,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)

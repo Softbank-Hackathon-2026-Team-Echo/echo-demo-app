@@ -85,6 +85,29 @@ async def test_index_serves_page_without_external_resources(client: httpx.AsyncC
     assert not re.search(r"""@import|url\(\s*["']?(https?:)?//""", html)
 
 
+async def test_index_zero_downtime_client_values(client: httpx.AsyncClient) -> None:
+    """무중단(#23): 긴 타임아웃·같은 키 재시도·지연 표시가 화면에 들어 있다."""
+    html = (await client.get("/")).text
+    for text in (
+        "const WRITE_TIMEOUT_MS = 60000;",
+        "const SUMMARY_TIMEOUT_MS = 30000;",
+        "const RETRY_WINDOW_MS = 60000;",
+        "const RETRY_EVERY_MS = 1000;",
+        "new Set([502, 503, 504])",
+        '"Idempotency-Key": key',
+        'params.get("slow")',
+        ": 3000;",  # ?slow 기본 임계 3000ms
+        ": 1000;",  # ?interval 기본 1000ms(#24)
+        "지연된 요청",
+        "최대 지연(초)",
+        "재시도 중 ",
+        'id="s-slow"',
+        'id="s-max"',
+        "#strip span.slow",
+    ):
+        assert text in html, text
+
+
 def test_ledger_summary_missing_counts_gaps_like_verify_sh() -> None:
     summary = LedgerSummary(total=5, distinct=5, min_n=1, max_n=7, by_environment=[], recent=[])
     assert summary.missing == 2

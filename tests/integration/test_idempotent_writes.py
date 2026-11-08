@@ -98,7 +98,8 @@ async def test_create_write_without_key_is_unchanged_when_enabled(
 async def test_create_write_flag_off_ignores_key(
     database_url: str, empty_ledger: psycopg.Connection
 ) -> None:
-    async with running_client(make_settings(database_url)) as client:
+    settings = make_settings(database_url, idempotent_writes=False)
+    async with running_client(settings) as client:
         first = await client.post("/api/writes", headers={"Idempotency-Key": "k-1"})
         again = await client.post("/api/writes", headers={"Idempotency-Key": "k-1"})
 
